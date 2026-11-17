@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.8', pollMs: 30000
+  version: '0.9', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -108,55 +108,72 @@ async function loadFeed() {
 }
 
 // ---------- Охота ----------
-// Файлы хранилища: catalog.json (меню фильтров, пишет парсер), hunts.json (выбор, пишет приложение), market.json (рынок, пишет парсер)
-let catalog = [], huntSel = {cat: null, filters: {}}, huntsDoc = {sha: null}, market = null, shown = {};
-const SEED_CATALOG = [{id: 'ram', name: 'Оперативная память', partial: true, filters: [
-  {group: 'Тип памяти', values: ['DDR', 'DDR2', 'DDR3', 'DDR3L', 'DDR4']},
-  {group: 'Форм-фактор', values: ['CAMM2', 'CUDIMM', 'DIMM', 'FB-DIMM', 'LRDIMM']},
-  {group: 'Объём одного модуля памяти', values: ['1 ГБ', '2 ГБ', '12 ГБ', '16 ГБ', '128 ГБ']}]}];
+// Файлы хранилища: catalog.json (меню фильтров с Авито, пишет парсер), hunts.json (выбор, пишет приложение), market.json (рынок, пишет парсер)
+// Формат меню: {categories:[{id,name,sections:[{param,kind:'checkbox'|'dropdown',title,options:[{id,label}]}]}]}
+// Выбор: filters = {код_параметра: [коды_значений]} — так Авито и принимает фильтры; labels = то же словами для людей.
+let catalog = [], huntSel = {cat: null, filters: {}}, huntsDoc = {sha: null}, market = null, shown = {}, ddq = {};
+const curCat = () => catalog.find(x => x.id === huntSel.cat) || catalog[0];
 const huntId = () => {
-  const c = huntSel.cat || 'x'; const f = huntSel.filters; const g = Object.keys(f)[0];
-  const first = g ? (f[g] || []).slice().sort().join('+') : 'all';
-  return (c + '-' + (first || 'all')).toLowerCase().replace(/[^a-z0-9а-яё+-]+/g, '');
+  const c = curCat(); if (!c) return 'x';
+  let first = 'all';
+  for (const s of c.sections) { const ids = huntSel.filters[s.param]; if (ids && ids.length) { first = ids.map(i => (s.options.find(o => o.id === i) || {}).label || i).sort().join('+'); break; } }
+  return (c.id + '-' + first).toLowerCase().replace(/[^a-z0-9а-яё+-]+/g, '');
 };
 async function loadHunt() {
-  if (!token()) { $('hmsg').textContent = 'Сначала вставь ключ доступа на вкладке «Ещё».'; }
+  if (!token()) { $('hmsg').textContent = 'Сначала вставь ключ доступа на вкладке «Ещё».'; return; }
   try {
-    const [cat, hu, mk] = token() ? await Promise.all([readJson('catalog.json'), readJson('hunts.json'), readJson('market.json')]) : [{}, {}, {}];
-    catalog = (cat.data && cat.data.categories && cat.data.categories.length) ? cat.data.categories : SEED_CATALOG;
+    const [cat, hu, mk] = await Promise.all([readJson('catalog.json'), readJson('hunts.json'), readJson('market.json')]);
+    catalog = ((cat.data && cat.data.categories) || []).filter(c => c.sections && c.sections.length);
     huntsDoc = {sha: hu.sha};
     const cur = hu.data && hu.data.hunts && hu.data.hunts[0];
     if (cur && !huntSel.cat) huntSel = {cat: cur.category, filters: cur.filters || {}};
-    if (!huntSel.cat || !catalog.find(c => c.id === huntSel.cat)) huntSel = {cat: catalog[0].id, filters: {}};
+    if (catalog.length && !catalog.find(c => c.id === huntSel.cat)) huntSel = {cat: catalog[0].id, filters: {}};
     market = mk.data;
-  } catch (e) { catalog = catalog.length ? catalog : SEED_CATALOG; $('hmsg').textContent = 'Не удалось загрузить: ' + (e.message || e); if (!huntSel.cat) huntSel.cat = catalog[0].id; }
+  } catch (e) { $('hmsg').textContent = 'Не удалось загрузить: ' + (e.message || e); }
   renderHunt(); renderMarket();
 }
 function renderHunt() {
   const sel = $('hcat');
-  sel.innerHTML = catalog.map(c => `<option value="${esc(c.id)}" ${c.id === huntSel.cat ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
-  sel.onchange = () => { huntSel = {cat: sel.value, filters: {}}; shown = {}; renderHunt(); renderMarket(); };
-  const c = catalog.find(x => x.id === huntSel.cat) || catalog[0];
-  $('hfilters').innerHTML = (c.partial ? '<p class="m">Список неполный: парсер дополнит его, когда обновит меню с Авито.</p>' : '') +
-    (c.filters || []).map((g, gi) => {
-      const lim = shown[g.group] ? 999 : 10; const chosen = huntSel.filters[g.group] || [];
-      const vals = g.values.slice(0, lim).map(v => `<button class="chip ${chosen.includes(v) ? 'on' : ''}" data-g="${gi}" data-v="${esc(v)}">${esc(v)}</button>`).join('');
-      const more = g.values.length > lim ? `<button class="chip more" data-more="${gi}">Показать ещё</button>` : '';
-      return `<div class="grp"><b>${esc(g.group)}</b><div class="chips">${vals}${more}</div></div>`;
-    }).join('');
+  if (!catalog.length) { sel.innerHTML = ''; $('hfilters').innerHTML = '<p class="m">Меню фильтров ещё не пришло от парсера.</p>'; return; }
+  sel.innerHTML = catalog.map(c => `<option value="${esc(c.id)}" ${c.id === huntSel.cat ? 'selected' : ''}>${esc(c.name)}${c.count ? ' · ' + esc(String(c.count).replace(/\s/g, ' ')) : ''}</option>`).join('');
+  sel.onchange = () => { huntSel = {cat: sel.value, filters: {}}; shown = {}; ddq = {}; renderHunt(); renderMarket(); };
+  const c = curCat();
+  const chip = (s, o, on) => `<button class="chip ${on ? 'on' : ''}" data-p="${esc(s.param)}" data-v="${esc(o.id)}">${esc(o.label)}</button>`;
+  $('hfilters').innerHTML = c.sections.map(s => {
+    const chosen = huntSel.filters[s.param] || [];
+    let body;
+    if (s.kind === 'dropdown' || s.options.length > 30) {
+      const q = (ddq[s.param] || '').toLowerCase().trim();
+      const pick = s.options.filter(o => chosen.includes(o.id));
+      const found = q ? s.options.filter(o => !chosen.includes(o.id) && o.label.toLowerCase().includes(q)).slice(0, 24) : [];
+      body = `<div class="chips">${pick.map(o => chip(s, o, true)).join('')}</div>
+        <input type="text" class="dq" data-q="${esc(s.param)}" placeholder="Найти среди ${s.options.length}…" value="${esc(ddq[s.param] || '')}" style="margin-top:8px">
+        <div class="chips">${found.map(o => chip(s, o, false)).join('')}${q && !found.length ? '<p class="m">Не нашлось.</p>' : ''}</div>`;
+    } else {
+      const lim = shown[s.param] ? 999 : 10;
+      body = `<div class="chips">${s.options.slice(0, lim).map(o => chip(s, o, chosen.includes(o.id))).join('')}${s.options.length > lim ? `<button class="chip more" data-more="${esc(s.param)}">Показать ещё</button>` : ''}</div>`;
+    }
+    return `<div class="grp"><b>${esc(s.title)}</b>${body}</div>`;
+  }).join('');
   $('hfilters').querySelectorAll('[data-v]').forEach(b => b.onclick = () => {
-    const g = c.filters[+b.dataset.g].group, v = b.dataset.v; const arr = huntSel.filters[g] || (huntSel.filters[g] = []);
+    const p = b.dataset.p, v = b.dataset.v; const arr = huntSel.filters[p] || (huntSel.filters[p] = []);
     const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); else arr.push(v);
-    if (!arr.length) delete huntSel.filters[g];
+    if (!arr.length) delete huntSel.filters[p];
+    ddq[p] = '';
     $('hmsg').textContent = ''; renderHunt(); renderMarket();
   });
-  $('hfilters').querySelectorAll('[data-more]').forEach(b => b.onclick = () => { shown[c.filters[+b.dataset.more].group] = true; renderHunt(); });
+  $('hfilters').querySelectorAll('[data-more]').forEach(b => b.onclick = () => { shown[b.dataset.more] = true; renderHunt(); });
+  $('hfilters').querySelectorAll('[data-q]').forEach(el => el.oninput = () => {
+    const p = el.dataset.q; ddq[p] = el.value; const pos = el.selectionStart; renderHunt();
+    const n = $('hfilters').querySelector(`[data-q="${CSS.escape(p)}"]`); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} }
+  });
 }
 $('hsave').onclick = async () => {
   if (!token()) { toast('Нужен ключ доступа'); return; }
-  const c = catalog.find(x => x.id === huntSel.cat); const id = huntId();
+  const c = curCat(); if (!c) return; const id = huntId();
+  const labels = {}; c.sections.forEach(s => { const ids = huntSel.filters[s.param]; if (ids) labels[s.title] = ids.map(i => (s.options.find(o => o.id === i) || {}).label || i); });
   const body = {rev: Date.now(), updated_at: new Date().toISOString(), updated_by: 'app',
-    hunts: [{id, name: c.name + (Object.keys(huntSel.filters).length ? ': ' + Object.values(huntSel.filters).map(a => a.join('+')).join(', ') : ''), category: huntSel.cat, filters: huntSel.filters}]};
+    hunts: [{id, name: c.name + (Object.keys(labels).length ? ': ' + Object.values(labels).map(a => a.join('+')).join(', ') : ''), category: c.id, filters: huntSel.filters, labels}]};
   $('hmsg').textContent = 'Сохраняю…';
   try {
     for (let t = 0; ; t++) {
