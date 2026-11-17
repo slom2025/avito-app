@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.4', pollMs: 30000
+  version: '0.5', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -193,6 +193,21 @@ $('reload').onclick = async () => {
 
 // ---------- Запуск ----------
 $('ver').textContent = 'Версия ' + CFG.version;
+if (token()) $('tokenmsg').textContent = 'Ключ сохранён (…' + token().slice(-4) + '). Вставлять заново не нужно.';
+// Автообновление: если на сервере версия новее, приложение само перезагружается со свежими файлами
+async function autoUpdate() {
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), {cache: 'no-store'}); if (!r.ok) return;
+    const v = (await r.json()).v;
+    if (v && v !== CFG.version) {
+      const key = 'upd_' + v; let done = false; try { done = sessionStorage.getItem(key); sessionStorage.setItem(key, '1'); } catch (_) {}
+      if (done) return;
+      try { const ks = await caches.keys(); for (const k of ks) await caches.delete(k); const rs = await navigator.serviceWorker.getRegistrations(); for (const x of rs) await x.update(); } catch (_) {}
+      location.replace(location.pathname + '?r=' + Date.now());
+    }
+  } catch (_) {}
+}
+autoUpdate(); setInterval(autoUpdate, 5 * 60 * 1000);
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', e => {
