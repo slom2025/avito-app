@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.2', pollMs: 30000
+  version: '0.3', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -10,6 +10,25 @@ const ls = {
 };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(t) { const el = $('toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => el.style.display = 'none', 2600); }
+
+// ---------- Открытие в приложении Авито ----------
+function avitoIntent(url) {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)avito\.ru$/.test(u.hostname)) return url;
+    return 'intent://' + u.host + u.pathname + u.search + '#Intent;scheme=https;package=com.avito.android;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
+  } catch (_) { return url; }
+}
+function showGo(url) {
+  if (!url) return;
+  let box = document.getElementById('gobox');
+  if (!box) { box = document.createElement('div'); box.id = 'gobox'; box.style.cssText = 'position:fixed;inset:0;background:rgba(10,12,16,.96);z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center'; document.body.appendChild(box); }
+  box.innerHTML = '<div style="font-size:18px;font-weight:600">Открыть объявление</div>' +
+    '<a href="' + esc(avitoIntent(url)) + '" style="display:block;width:100%;max-width:340px;padding:18px;border-radius:14px;background:#3d8bfd;color:#fff;text-decoration:none;font-weight:700;font-size:18px">Открыть в приложении Авито</a>' +
+    '<a href="' + esc(url) + '" style="color:#9aa1ae">Открыть в браузере</a>' +
+    '<button id="goclose" style="background:#20242d">Закрыть</button>';
+  document.getElementById('goclose').onclick = () => { box.remove(); history.replaceState(null, '', location.pathname); };
+}
 
 // ---------- GitHub ----------
 const token = () => ls.get('gh_token') || '';
@@ -63,7 +82,7 @@ async function renderFeed() {
     const price = it.price ? `<span class="price">${esc(it.price)}</span>` : '';
     const inner = `${price}<div class="t">${esc(it.title)}</div>
       <div class="meta">${tag}${dl}${t}</div>${it.body ? `<div class="body">${esc(it.body)}</div>` : ''}`;
-    return it.url ? `<a class="card item" href="${esc(it.url)}" target="_blank" rel="noopener">${inner}</a>` : `<div class="card item">${inner}</div>`;
+    return it.url ? `<a class="card item" href="${esc(avitoIntent(it.url))}">${inner}</a>` : `<div class="card item">${inner}</div>`;
   }).join('');
 }
 let feedEtag = ls.get('feed_etag') || '';
@@ -175,8 +194,12 @@ $('reload').onclick = async () => {
 $('ver').textContent = 'Версия ' + CFG.version;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
-  navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'item') renderFeed(); });
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'item') renderFeed();
+    if (e.data && e.data.type === 'go') showGo(e.data.url);
+  });
 }
 renderFeed(); loadFeed(); pushState();
 setInterval(() => { if (document.visibilityState === 'visible') loadFeed(); }, CFG.pollMs);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { renderFeed(); loadFeed(); } });
+try { const go = new URLSearchParams(location.search).get('go'); if (go) showGo(go); } catch (_) {}

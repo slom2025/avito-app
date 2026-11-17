@@ -30,6 +30,13 @@ self.addEventListener('push', e => {
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || './';
-  e.waitUntil(clients.openWindow(url));
+  const url = (e.notification.data && e.notification.data.url) || '';
+  const target = url ? './?go=' + encodeURIComponent(url) : './';
+  e.waitUntil((async () => {
+    const cl = await clients.matchAll({type: 'window', includeUncontrolled: true});
+    for (const c of cl) {
+      if (c.url.startsWith(self.registration.scope)) { await c.focus(); c.postMessage({type: 'go', url}); return; }
+    }
+    await clients.openWindow(target);
+  })());
 });
