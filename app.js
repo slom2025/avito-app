@@ -187,7 +187,7 @@ $('savetoken').onclick = async () => {
   catch (e) { $('tokenmsg').textContent = 'Нет связи с GitHub.'; }
 };
 $('reload').onclick = async () => {
-  try { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); const ks = await caches.keys(); for (const k of ks) await caches.delete(k); } catch (_) {}
+  try { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.update(); const ks = await caches.keys(); for (const k of ks) await caches.delete(k); } catch (_) {}
   location.replace(location.pathname + '?r=' + Date.now());
 };
 
