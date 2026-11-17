@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.5', pollMs: 30000
+  version: '0.6', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -27,7 +27,6 @@ function showGo(url) {
     '<a href="' + esc(avitoIntent(url)) + '" style="display:block;width:100%;max-width:340px;padding:18px;border-radius:14px;background:#3d8bfd;color:#fff;text-decoration:none;font-weight:700;font-size:18px">Открыть в приложении Авито</a>' +
     '<a href="' + esc(url) + '" style="color:#9aa1ae">Открыть в браузере</a>' +
     '<button id="goclose" style="background:#20242d">Закрыть</button>';
-  if (!showGo.tried) { showGo.tried = true; try { location.href = avitoIntent(url); } catch (_) {} }
   document.getElementById('goclose').onclick = () => { box.remove(); history.replaceState(null, '', location.pathname); };
 }
 
