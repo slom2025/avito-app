@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Авито-охотник</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--text:#eceef2;--muted:#9aa1ae;--accent:#3d8bfd;--ok:#3ecf8e;--bad:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:16px}
+  h1{font-size:20px;margin:4px 0 16px}
+  .card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px}
+  button{width:100%;padding:14px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-size:17px;font-weight:600}
+  button:disabled{opacity:.5}
+  p{margin:8px 0;color:var(--muted)}
+  #status{font-weight:600}
+  textarea{width:100%;height:120px;background:#0b0d11;color:var(--text);border:1px solid #2a2f3a;border-radius:10px;padding:8px;font-size:12px}
+  .ok{color:var(--ok)} .bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<h1>Авито-охотник · проверка пушей</h1>
+<div class="card">
+  <p>Шаг 1. Нажми кнопку и разреши уведомления.</p>
+  <button id="go">Включить пуши</button>
+  <p id="status">Ждём нажатия.</p>
+</div>
+<div class="card" id="box" hidden>
+  <p>Шаг 2. Нажми «Скопировать» и вставь текст мне в чат.</p>
+  <textarea id="sub" readonly></textarea>
+  <button id="copy" style="margin-top:10px">Скопировать</button>
+</div>
+<script>
+const PUBLIC_KEY = "BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4";
+const $ = id => document.getElementById(id);
+const say = (t, cls) => { $('status').textContent = t; $('status').className = cls || ''; };
+function b64(s){const p='='.repeat((4-s.length%4)%4);const r=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(r,c=>c.charCodeAt(0));}
+$('go').onclick = async () => {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) { say('Этот браузер не умеет пуши.', 'bad'); return; }
+    say('Регистрирую…');
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { say('Уведомления не разрешены. Разреши их в настройках сайта.', 'bad'); return; }
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64(PUBLIC_KEY)});
+    $('sub').value = JSON.stringify(sub);
+    $('box').hidden = false;
+    say('Готово: пуши включены.', 'ok');
+  } catch (e) { say('Ошибка: ' + (e && e.message || e), 'bad'); }
+};
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('sub').value); $('copy').textContent = 'Скопировано'; }
+  catch (e) { $('sub').select(); document.execCommand('copy'); $('copy').textContent = 'Скопировано'; }
+};
+</script>
+</body>
+</html>
