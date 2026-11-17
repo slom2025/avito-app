@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.7', pollMs: 30000
+  version: '0.8', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -60,6 +60,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab));
   if (b.dataset.tab === 'set') loadSettings();
+  if (b.dataset.tab === 'hunt') loadHunt();
 });
 
 // ---------- Лента ----------
@@ -105,6 +106,87 @@ async function loadFeed() {
     renderFeed();
   } catch (e) { $('conn').textContent = 'Нет связи с хранилищем (' + (e.message || e) + ')'; }
 }
+
+// ---------- Охота ----------
+// Файлы хранилища: catalog.json (меню фильтров, пишет парсер), hunts.json (выбор, пишет приложение), market.json (рынок, пишет парсер)
+let catalog = [], huntSel = {cat: null, filters: {}}, huntsDoc = {sha: null}, market = null, shown = {};
+const SEED_CATALOG = [{id: 'ram', name: 'Оперативная память', partial: true, filters: [
+  {group: 'Тип памяти', values: ['DDR', 'DDR2', 'DDR3', 'DDR3L', 'DDR4']},
+  {group: 'Форм-фактор', values: ['CAMM2', 'CUDIMM', 'DIMM', 'FB-DIMM', 'LRDIMM']},
+  {group: 'Объём одного модуля памяти', values: ['1 ГБ', '2 ГБ', '12 ГБ', '16 ГБ', '128 ГБ']}]}];
+const huntId = () => {
+  const c = huntSel.cat || 'x'; const f = huntSel.filters; const g = Object.keys(f)[0];
+  const first = g ? (f[g] || []).slice().sort().join('+') : 'all';
+  return (c + '-' + (first || 'all')).toLowerCase().replace(/[^a-z0-9а-яё+-]+/g, '');
+};
+async function loadHunt() {
+  if (!token()) { $('hmsg').textContent = 'Сначала вставь ключ доступа на вкладке «Ещё».'; }
+  try {
+    const [cat, hu, mk] = token() ? await Promise.all([readJson('catalog.json'), readJson('hunts.json'), readJson('market.json')]) : [{}, {}, {}];
+    catalog = (cat.data && cat.data.categories && cat.data.categories.length) ? cat.data.categories : SEED_CATALOG;
+    huntsDoc = {sha: hu.sha};
+    const cur = hu.data && hu.data.hunts && hu.data.hunts[0];
+    if (cur && !huntSel.cat) huntSel = {cat: cur.category, filters: cur.filters || {}};
+    if (!huntSel.cat || !catalog.find(c => c.id === huntSel.cat)) huntSel = {cat: catalog[0].id, filters: {}};
+    market = mk.data;
+  } catch (e) { catalog = catalog.length ? catalog : SEED_CATALOG; $('hmsg').textContent = 'Не удалось загрузить: ' + (e.message || e); if (!huntSel.cat) huntSel.cat = catalog[0].id; }
+  renderHunt(); renderMarket();
+}
+function renderHunt() {
+  const sel = $('hcat');
+  sel.innerHTML = catalog.map(c => `<option value="${esc(c.id)}" ${c.id === huntSel.cat ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  sel.onchange = () => { huntSel = {cat: sel.value, filters: {}}; shown = {}; renderHunt(); renderMarket(); };
+  const c = catalog.find(x => x.id === huntSel.cat) || catalog[0];
+  $('hfilters').innerHTML = (c.partial ? '<p class="m">Список неполный: парсер дополнит его, когда обновит меню с Авито.</p>' : '') +
+    (c.filters || []).map((g, gi) => {
+      const lim = shown[g.group] ? 999 : 10; const chosen = huntSel.filters[g.group] || [];
+      const vals = g.values.slice(0, lim).map(v => `<button class="chip ${chosen.includes(v) ? 'on' : ''}" data-g="${gi}" data-v="${esc(v)}">${esc(v)}</button>`).join('');
+      const more = g.values.length > lim ? `<button class="chip more" data-more="${gi}">Показать ещё</button>` : '';
+      return `<div class="grp"><b>${esc(g.group)}</b><div class="chips">${vals}${more}</div></div>`;
+    }).join('');
+  $('hfilters').querySelectorAll('[data-v]').forEach(b => b.onclick = () => {
+    const g = c.filters[+b.dataset.g].group, v = b.dataset.v; const arr = huntSel.filters[g] || (huntSel.filters[g] = []);
+    const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); else arr.push(v);
+    if (!arr.length) delete huntSel.filters[g];
+    $('hmsg').textContent = ''; renderHunt(); renderMarket();
+  });
+  $('hfilters').querySelectorAll('[data-more]').forEach(b => b.onclick = () => { shown[c.filters[+b.dataset.more].group] = true; renderHunt(); });
+}
+$('hsave').onclick = async () => {
+  if (!token()) { toast('Нужен ключ доступа'); return; }
+  const c = catalog.find(x => x.id === huntSel.cat); const id = huntId();
+  const body = {rev: Date.now(), updated_at: new Date().toISOString(), updated_by: 'app',
+    hunts: [{id, name: c.name + (Object.keys(huntSel.filters).length ? ': ' + Object.values(huntSel.filters).map(a => a.join('+')).join(', ') : ''), category: huntSel.cat, filters: huntSel.filters}]};
+  $('hmsg').textContent = 'Сохраняю…';
+  try {
+    for (let t = 0; ; t++) {
+      try { huntsDoc.sha = await writeJson('hunts.json', body, huntsDoc.sha, 'app: охота ' + id); break; }
+      catch (e) { if (t < 1 && /409|422/.test(String(e.message))) huntsDoc.sha = (await readJson('hunts.json')).sha; else throw e; }
+    }
+    $('hmsg').textContent = 'Сохранено: ' + id + '. Парсер подхватит и начнёт обход.'; renderMarket();
+  } catch (e) { $('hmsg').textContent = 'Не сохранилось: ' + (e.message || e); }
+};
+const rub = n => n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ₽';
+function cfgName(c) {
+  if (c.modules && c.gb) return c.modules + '×' + c.gb + ' ГБ' + (c.mhz ? ' · ' + c.mhz + ' МГц' : '');
+  return c.key || '?';
+}
+function renderMarket() {
+  const id = huntId(); const h = market && market.hunts && market.hunts[id];
+  const head = $('hmarkhead'), box = $('hmarket');
+  if (!h || !(h.configs || []).length) {
+    head.textContent = 'Для охоты «' + id + '» данных пока нет. Парсер ещё не обошёл раздел или не сохранён выбор.'; box.innerHTML = ''; return;
+  }
+  const q = ($('hq').value || '').toLowerCase().replace(/[x×*]/g, 'x').replace(/\s+/g, ' ').trim();
+  const list = h.configs.filter(c => !q || (cfgName(c) + ' ' + (c.key || '')).toLowerCase().replace(/[×*]/g, 'x').replace(/гб|мгц|·/g, '').replace(/\s+/g, ' ').includes(q))
+    .sort((a, b) => (b.sold_week || 0) - (a.sold_week || 0)).slice(0, 80);
+  const upd = market.updated ? ' · обновлено ' + new Date(market.updated).toLocaleString('ru-RU', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '';
+  head.textContent = 'Конфигураций: ' + h.configs.length + upd;
+  box.innerHTML = list.map(c => `<div class="mk"><div><div class="n">${esc(cfgName(c))}</div>
+    <div class="s">в продаже ${c.listed == null ? '—' : c.listed}${c.avg_days != null ? ' · снимается за ' + Math.round(c.avg_days) + ' дн' : ''}</div></div>
+    <div class="r"><div class="n">${esc(rub(c.median))}</div><div class="s">продаж за неделю ${c.sold_week == null ? '—' : c.sold_week}${c.avg != null ? ' · сред. ' + esc(rub(c.avg)) : ''}</div></div></div>`).join('') || '<p class="m">Ничего не найдено.</p>';
+}
+$('hq').oninput = renderMarket;
 
 // ---------- Настройки ----------
 let settings = {values: {}, sha: null}, schema = [];
