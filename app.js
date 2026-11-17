@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.6', pollMs: 30000
+  version: '0.7', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -128,7 +128,12 @@ function renderSettings() {
   }).join('');
   $('controls').querySelectorAll('[data-k]').forEach(el => el.onchange = () => {
     const k = el.dataset.k; const c = schema.find(x => x.key === k);
-    settings.values[k] = c.type === 'bool' ? el.checked : Number(el.value);
+    if (c.type === 'bool') settings.values[k] = el.checked;
+    else {
+      let n = Number(el.value); if (!isFinite(n)) n = c.default;
+      if (c.min != null) n = Math.max(c.min, n); if (c.max != null) n = Math.min(c.max, n);
+      el.value = n; settings.values[k] = n;
+    }
     scheduleSave();
   });
 }
