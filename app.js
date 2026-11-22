@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.9', pollMs: 30000
+  version: '0.10', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -266,8 +266,10 @@ $('pushbtn').onclick = async () => {
   try {
     const reg = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
     if (await Notification.requestPermission() !== 'granted') { toast('Уведомления не разрешены в настройках сайта'); return; }
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64u(CFG.publicKey)});
+    // Старая подписка могла умереть у Google (ответ 410), поэтому всегда берём новую
+    const old = await reg.pushManager.getSubscription();
+    if (old) { try { await old.unsubscribe(); } catch (_) {} }
+    const sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64u(CFG.publicKey)});
     const subJson = sub.toJSON();
     if (token()) {
       const id = (subJson.keys.auth || 'dev').replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
