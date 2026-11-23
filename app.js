@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.14', pollMs: 30000
+  version: '0.15', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -77,8 +77,9 @@ async function renderFeed() {
   if (!items.length) { el.innerHTML = '<div class="empty">Находок пока нет.<br>Когда парсер что-то найдёт, они появятся здесь.</div>'; return; }
   el.innerHTML = items.slice(0, 200).map(it => {
     const delay = (it.sent_at && it.received_at) ? (it.received_at - it.sent_at) / 1000 : null;
-    const dl = delay == null ? '' : `<span class="badge ${delay < 5 ? 'fast' : 'slow'}">пуш шёл ${delay.toFixed(1)} с</span>`;
-    const t = it.sent_at ? ago(it.sent_at) : '';
+    const dtxt = delay == null ? '' : delay < 60 ? Math.round(delay) + ' с' : Math.floor(delay / 60) + ' мин ' + Math.round(delay % 60) + ' с';
+    const dl = delay == null ? '' : `<span class="badge ${delay < 5 ? 'fast' : 'slow'}">пуш с компа до телефона ${dtxt}</span>`;
+    const t = it.sent_at ? 'комп отправил в ' + new Date(it.sent_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) + ' (' + ago(it.sent_at) + ')' : '';
     const tag = it.category ? `<span class="badge">${esc(it.category)}</span>` : '';
     const price = it.price ? `<span class="price">${esc(it.price)}</span>` : '';
     const inner = `${price}<div class="t">${esc(it.title)}</div>
