@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.11', pollMs: 30000
+  version: '0.12', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -83,8 +83,35 @@ async function renderFeed() {
     const price = it.price ? `<span class="price">${esc(it.price)}</span>` : '';
     const inner = `${price}<div class="t">${esc(it.title)}</div>
       <div class="meta">${tag}${dl}${t}</div>${it.body ? `<div class="body">${esc(it.body)}</div>` : ''}`;
-    return it.url ? `<a class="card item" href="${esc(avitoIntent(it.url))}">${inner}</a>` : `<div class="card item">${inner}</div>`;
+    const nd = it.url && /^\d+$/.test(String(it.id || '')) ? (marked.has(String(it.id))
+      ? `<button class="sec nd on" data-nd="${esc(it.id)}">✓ Отмечено: доставки нет (отменить)</button>`
+      : `<button class="sec nd" data-nd="${esc(it.id)}" data-ndt="${esc(it.title)}">Доставки нет — пуш зря</button>`) : '';
+    return it.url ? `<div class="card"><a class="item" href="${esc(avitoIntent(it.url))}">${inner}</a>${nd}</div>` : `<div class="card item">${inner}</div>`;
   }).join('');
+  el.querySelectorAll('[data-nd]').forEach(b => b.onclick = () => toggleMark(b.dataset.nd, b.dataset.ndt || ''));
+}
+// ---------- Отметка «доставки нет» ----------
+// marks.json: {rev, updated_at, marks:[{item, mark:'no_delivery', at, title}]}; комп забирает его в data/app_marks.json.
+// На компе: объявление считается без доставки, действует правило 150 км от Таганрога; при любой ошибке файла пуши идут как раньше.
+let marked = new Set((() => { try { return JSON.parse(ls.get('nd_marks') || '[]'); } catch (_) { return []; } })());
+async function toggleMark(id, title) {
+  if (!token()) { toast('Нужен ключ доступа'); return; }
+  const was = marked.has(id);
+  try {
+    for (let t = 0; ; t++) {
+      const cur = await readJson('marks.json');
+      const doc = Object.assign({rev: 0, marks: []}, cur.data || {});
+      doc.marks = (doc.marks || []).filter(m => !(m.item === id && m.mark === 'no_delivery'));
+      if (!was) doc.marks.push({item: id, mark: 'no_delivery', at: new Date().toISOString(), title});
+      doc.marks = doc.marks.slice(-500); doc.rev = Date.now(); doc.updated_at = new Date().toISOString();
+      try { await writeJson('marks.json', doc, cur.sha, 'app: доставки нет ' + id); break; }
+      catch (e) { if (!(t < 1 && /409|422/.test(String(e.message)))) throw e; }
+    }
+    if (was) marked.delete(id); else marked.add(id);
+    ls.set('nd_marks', JSON.stringify([...marked].slice(-500)));
+    toast(was ? 'Отметка снята' : 'Отмечено: доставки нет. Повторов издалека не будет');
+    renderFeed();
+  } catch (e) { toast('Не сохранилось: ' + (e.message || e)); }
 }
 let feedEtag = ls.get('feed_etag') || '';
 async function loadFeed() {
