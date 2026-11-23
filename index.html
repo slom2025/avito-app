@@ -51,27 +51,32 @@
   .mk{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #232733;font-size:15px}
   .mk:last-child{border-bottom:0}.mk .n{font-weight:600}.mk .s{color:var(--muted);font-size:13px}
   .mk .r{text-align:right;white-space:nowrap}
+  .gh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px}
+  .gh .md{color:var(--ok);font-size:13px;white-space:nowrap}
+  .ar{color:var(--muted);width:18px;flex:none;text-align:center}
+  .det{background:#0f1218;border-radius:10px;padding:8px 10px;margin:0 0 8px;font-size:14px;display:grid;grid-template-columns:1fr auto;gap:3px 12px}
+  .det span:nth-child(even){text-align:right;font-weight:600}
+  .fc{color:var(--warn);font-size:13px;margin-top:6px}
+  .row.off .l{opacity:.55}
 </style>
 </head>
 <body>
 <header><h1>Авито-охотник</h1><div id="conn">Подключаюсь…</div></header>
 <main>
   <section id="tab-feed" class="tab on"><div id="feed"></div></section>
-  <section id="tab-hunt" class="tab">
-    <div class="card">
-      <b>Что ищем</b>
-      <p class="m">Выбери раздел и фильтры, как на Авито. Парсер обойдёт все объявления по ним и посчитает рынок.</p>
-      <select id="hcat"></select>
-      <div id="hfilters"></div>
-      <button class="full" id="hsave" style="margin-top:14px">Сохранить охоту</button>
-      <p class="m" id="hmsg"></p>
+  <section id="tab-goals" class="tab">
+    <p class="m" id="gmsg"></p>
+    <div id="ggroups"></div>
+    <div class="card" id="gadd" hidden>
+      <b>Добавить цель: оперативная память</b>
+      <div class="grp"><b>1. Тип</b><div class="chips" id="gtype"></div></div>
+      <div class="grp"><b>2. Набор</b> <span class="m">(рыночная цена)</span><div class="chips" id="gset"></div></div>
+      <div class="grp"><b>3. Для чего</b><div class="chips" id="guse"></div></div>
+      <p class="m" id="gaddnote"></p>
+      <button class="full" id="gaddsave" style="margin-top:10px">Сохранить цель</button>
+      <button class="full sec" id="gaddcancel" style="margin-top:8px">Отмена</button>
     </div>
-    <div class="card">
-      <b>Рынок по охоте</b>
-      <p class="m" id="hmarkhead">Загружаю…</p>
-      <input type="text" id="hq" placeholder="Найти конфигурацию, например 2x16 3200" style="margin:6px 0">
-      <div id="hmarket"></div>
-    </div>
+    <button class="full sec" id="gaddopen">+ Добавить цель</button>
   </section>
   <section id="tab-set" class="tab">
     <div class="card"><div id="controls"><p class="m">Загружаю настройки…</p></div>
@@ -98,7 +103,7 @@
 </main>
 <nav>
   <button data-tab="feed" class="on">Лента</button>
-  <button data-tab="hunt">Охота</button>
+  <button data-tab="goals">Цели</button>
   <button data-tab="set">Настройки</button>
   <button data-tab="me">Ещё</button>
 </nav>

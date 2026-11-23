@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.10', pollMs: 30000
+  version: '0.11', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -60,7 +60,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab));
   if (b.dataset.tab === 'set') loadSettings();
-  if (b.dataset.tab === 'hunt') loadHunt();
+  if (b.dataset.tab === 'goals') loadGoals();
 });
 
 // ---------- Лента ----------
@@ -107,106 +107,97 @@ async function loadFeed() {
   } catch (e) { $('conn').textContent = 'Нет связи с хранилищем (' + (e.message || e) + ')'; }
 }
 
-// ---------- Охота ----------
-// Файлы хранилища: catalog.json (меню фильтров с Авито, пишет парсер), hunts.json (выбор, пишет приложение), market.json (рынок, пишет парсер)
-// Формат меню: {categories:[{id,name,sections:[{param,kind:'checkbox'|'dropdown',title,options:[{id,label}]}]}]}
-// Выбор: filters = {код_параметра: [коды_значений]} — так Авито и принимает фильтры; labels = то же словами для людей.
-let catalog = [], huntSel = {cat: null, filters: {}}, huntsDoc = {sha: null}, market = null, shown = {}, ddq = {};
-const curCat = () => catalog.find(x => x.id === huntSel.cat) || catalog[0];
-const huntId = () => {
-  const c = curCat(); if (!c) return 'x';
-  let first = 'all';
-  for (const s of c.sections) { const ids = huntSel.filters[s.param]; if (ids && ids.length) { first = ids.map(i => (s.options.find(o => o.id === i) || {}).label || i).sort().join('+'); break; } }
-  return (c.id + '-' + first).toLowerCase().replace(/[^a-z0-9а-яё+-]+/g, '');
-};
-async function loadHunt() {
-  if (!token()) { $('hmsg').textContent = 'Сначала вставь ключ доступа на вкладке «Ещё».'; return; }
+// ---------- Цели ----------
+// targets.json пишет комп (что ищется сейчас и цифры по каждой цели), prefs.json пишет приложение (твой выбор).
+// Комп читает prefs.json только как сито перед отправкой пуша: если файл сломан или пропал, пуши идут как раньше.
+// targets.json: {updated, groups:[{id,name,median_min,add_min}], targets:[{id,group,kind,name,sub,on,market,sales_month,pushes_month,listed,median_min}],
+//                ram_tree:{DDR4:[{set,label,market,sales_month}], DDR5:[...]}}
+// prefs.json:   {rev, targets:{<id>:{on:false}}, ram:[{type,set,use}]}
+const rub = n => n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ₽';
+const num = n => n == null ? '—' : String(n);
+const mins = n => n == null ? '—' : Math.round(n) + ' мин';
+const USES = [['desktop', 'Компьютерная'], ['laptop', 'Ноутбучная']];
+let goals = null, prefs = {rev: 0, targets: {}, ram: []}, prefsSha = null, gOpen = {}, gAdd = {type: 'DDR4', sets: [], use: 'desktop'};
+const ramId = r => 'ram-' + r.type.toLowerCase() + '-' + r.set + '-' + r.use;
+const ramName = r => 'Оперативка ' + r.type + ' ' + String(r.set).replace('x', '×') + ', ' + (r.use === 'laptop' ? 'ноутбучная' : 'компьютерная');
+const isOn = t => { const p = prefs.targets[t.id]; return p && 'on' in p ? p.on !== false : t.on !== false; };
+async function loadGoals() {
+  if (!token()) { $('gmsg').textContent = 'Сначала вставь ключ доступа на вкладке «Ещё».'; return; }
+  $('gmsg').textContent = 'Загружаю…';
   try {
-    const [cat, hu, mk] = await Promise.all([readJson('catalog.json'), readJson('hunts.json'), readJson('market.json')]);
-    catalog = ((cat.data && cat.data.categories) || []).filter(c => c.sections && c.sections.length);
-    huntsDoc = {sha: hu.sha};
-    const cur = hu.data && hu.data.hunts && hu.data.hunts[0];
-    if (cur && !huntSel.cat) huntSel = {cat: cur.category, filters: cur.filters || {}};
-    if (catalog.length && !catalog.find(c => c.id === huntSel.cat)) huntSel = {cat: catalog[0].id, filters: {}};
-    market = mk.data;
-  } catch (e) { $('hmsg').textContent = 'Не удалось загрузить: ' + (e.message || e); }
-  renderHunt(); renderMarket();
+    const [tg, pf] = await Promise.all([readJson('targets.json'), readJson('prefs.json')]);
+    goals = tg.data; prefsSha = pf.sha;
+    if (pf.data) prefs = Object.assign({rev: 0, targets: {}, ram: []}, pf.data);
+    $('gmsg').textContent = goals ? 'Обновлено ' + new Date(goals.updated).toLocaleString('ru-RU', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : 'Список целей ещё не пришёл с компа. Оперативку уже можно добавить, пуши по ней начнутся, когда комп подхватит.';
+  } catch (e) { $('gmsg').textContent = 'Не удалось загрузить: ' + (e.message || e); }
+  renderGoals();
 }
-function renderHunt() {
-  const sel = $('hcat');
-  if (!catalog.length) { sel.innerHTML = ''; $('hfilters').innerHTML = '<p class="m">Меню фильтров ещё не пришло от парсера.</p>'; return; }
-  sel.innerHTML = catalog.map(c => `<option value="${esc(c.id)}" ${c.id === huntSel.cat ? 'selected' : ''}>${esc(c.name)}${c.count ? ' · ' + esc(String(c.count).replace(/\s/g, ' ')) : ''}</option>`).join('');
-  sel.onchange = () => { huntSel = {cat: sel.value, filters: {}}; shown = {}; ddq = {}; renderHunt(); renderMarket(); };
-  const c = curCat();
-  const chip = (s, o, on) => `<button class="chip ${on ? 'on' : ''}" data-p="${esc(s.param)}" data-v="${esc(o.id)}">${esc(o.label)}</button>`;
-  $('hfilters').innerHTML = c.sections.map(s => {
-    const chosen = huntSel.filters[s.param] || [];
-    let body;
-    if (s.kind === 'dropdown' || s.options.length > 30) {
-      const q = (ddq[s.param] || '').toLowerCase().trim();
-      const pick = s.options.filter(o => chosen.includes(o.id));
-      const found = q ? s.options.filter(o => !chosen.includes(o.id) && o.label.toLowerCase().includes(q)).slice(0, 24) : [];
-      body = `<div class="chips">${pick.map(o => chip(s, o, true)).join('')}</div>
-        <input type="text" class="dq" data-q="${esc(s.param)}" placeholder="Найти среди ${s.options.length}…" value="${esc(ddq[s.param] || '')}" style="margin-top:8px">
-        <div class="chips">${found.map(o => chip(s, o, false)).join('')}${q && !found.length ? '<p class="m">Не нашлось.</p>' : ''}</div>`;
-    } else {
-      const lim = shown[s.param] ? 999 : 10;
-      body = `<div class="chips">${s.options.slice(0, lim).map(o => chip(s, o, chosen.includes(o.id))).join('')}${s.options.length > lim ? `<button class="chip more" data-more="${esc(s.param)}">Показать ещё</button>` : ''}</div>`;
-    }
-    return `<div class="grp"><b>${esc(s.title)}</b>${body}</div>`;
+function goalRow(t) {
+  const on = isOn(t), open = gOpen[t.id];
+  const det = open ? `<div class="det"><span>Обычно продают за</span><span>${rub(t.market)}</span><span>Продаж за месяц</span><span>${num(t.sales_month)}</span>
+    <span>Выгодных пушей за месяц</span><span>${num(t.pushes_month)}</span><span>Сейчас на Авито</span><span>${num(t.listed)}</span>
+    <span>Находка через</span><span>${mins(t.median_min)}</span></div>` : '';
+  const sub = t.sub || (t.pushes_month != null ? t.pushes_month + ' пушей за месяц' : '');
+  return `<div class="row ${on ? '' : 'off'}" data-open="${esc(t.id)}"><span class="ar">${open ? '▾' : '▸'}</span>
+    <div class="l">${esc(t.name)}${sub ? `<div class="h">${esc(sub)}</div>` : ''}</div>
+    <label class="sw" data-stop="1"><input type="checkbox" data-goal="${esc(t.id)}" ${on ? 'checked' : ''}><span></span></label></div>${det}`;
+}
+function renderGoals() {
+  const ts = (goals && goals.targets) || [];
+  const groups = (goals && goals.groups && goals.groups.length) ? goals.groups : [{id: 'fast', name: 'Быстрый поиск'}, {id: 'other', name: 'Остальные цели'}];
+  const known = new Set(ts.map(t => t.id));
+  const ramRows = (prefs.ram || []).map(r => ({id: ramId(r), group: 'other', kind: 'ram', name: ramName(r), sub: 'твоя цель', ram: r}))
+    .filter(r => !known.has(r.id));
+  $('ggroups').innerHTML = groups.map(g => {
+    const rows = ts.filter(t => (t.group || 'other') === g.id).concat(g.id === 'other' ? ramRows : []);
+    const rowsHtml = rows.length ? rows.map(t => t.ram
+      ? `<div class="row"><span class="ar">·</span><div class="l">${esc(t.name)}<div class="h">${esc(t.sub)}</div></div><button class="sec" data-delram="${esc(t.id)}" style="padding:8px 12px">Убрать</button></div>`
+      : goalRow(t)).join('') : '<p class="m">Пока пусто.</p>';
+    const fc = g.add_min != null && g.id === 'other' ? `<div class="fc">Если добавить ещё цель: примерно +${Math.round(g.add_min)} мин</div>` : '';
+    return `<div class="card"><div class="gh"><b>${g.id === 'fast' ? '⚡ ' : ''}${esc(g.name)}</b><span class="md">${g.median_min != null ? 'находка через ~' + Math.round(g.median_min) + ' мин' : ''}</span></div>${rowsHtml}${fc}</div>`;
   }).join('');
-  $('hfilters').querySelectorAll('[data-v]').forEach(b => b.onclick = () => {
-    const p = b.dataset.p, v = b.dataset.v; const arr = huntSel.filters[p] || (huntSel.filters[p] = []);
-    const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); else arr.push(v);
-    if (!arr.length) delete huntSel.filters[p];
-    ddq[p] = '';
-    $('hmsg').textContent = ''; renderHunt(); renderMarket();
+  $('ggroups').querySelectorAll('[data-open]').forEach(el => el.onclick = e => { if (e.target.closest('[data-stop]')) return; gOpen[el.dataset.open] = !gOpen[el.dataset.open]; renderGoals(); });
+  $('ggroups').querySelectorAll('[data-goal]').forEach(el => el.onchange = () => {
+    prefs.targets[el.dataset.goal] = {on: el.checked}; savePrefs(el.checked ? 'Цель включена' : 'Цель выключена: пуши по ней не придут'); renderGoals();
   });
-  $('hfilters').querySelectorAll('[data-more]').forEach(b => b.onclick = () => { shown[b.dataset.more] = true; renderHunt(); });
-  $('hfilters').querySelectorAll('[data-q]').forEach(el => el.oninput = () => {
-    const p = el.dataset.q; ddq[p] = el.value; const pos = el.selectionStart; renderHunt();
-    const n = $('hfilters').querySelector(`[data-q="${CSS.escape(p)}"]`); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} }
+  $('ggroups').querySelectorAll('[data-delram]').forEach(el => el.onclick = () => {
+    prefs.ram = (prefs.ram || []).filter(r => ramId(r) !== el.dataset.delram); savePrefs('Цель убрана'); renderGoals();
   });
 }
-$('hsave').onclick = async () => {
+function renderAdd() {
+  const tree = (goals && goals.ram_tree) || {};
+  const types = Object.keys(tree).length ? Object.keys(tree) : ['DDR4', 'DDR5'];
+  if (!types.includes(gAdd.type)) gAdd.type = types[0];
+  $('gtype').innerHTML = types.map(t => `<button class="chip ${t === gAdd.type ? 'on' : ''}" data-gt="${esc(t)}">${esc(t)}</button>`).join('');
+  const sets = tree[gAdd.type] || [];
+  $('gset').innerHTML = sets.length ? sets.map(x => `<button class="chip ${gAdd.sets.includes(x.set) ? 'on' : ''}" data-gs="${esc(x.set)}">${esc(x.label || x.set)} <span class="m" style="color:var(--ok)">${x.market != null ? rub(x.market) : ''}</span></button>`).join('')
+    : '<p class="m">Наборы и цены появятся, когда комп посчитает рынок оперативки.</p>';
+  $('guse').innerHTML = USES.map(([k, l]) => `<button class="chip ${k === gAdd.use ? 'on' : ''}" data-gu="${k}">${l}</button>`).join('');
+  $('gaddnote').textContent = gAdd.sets.length ? 'Пуши придут только по: ' + gAdd.sets.map(s => ramName({type: gAdd.type, set: s, use: gAdd.use})).join('; ') + '.' : 'Выбери один или несколько наборов.';
+  $('gtype').querySelectorAll('[data-gt]').forEach(b => b.onclick = () => { gAdd.type = b.dataset.gt; gAdd.sets = []; renderAdd(); });
+  $('gset').querySelectorAll('[data-gs]').forEach(b => b.onclick = () => { const v = b.dataset.gs, i = gAdd.sets.indexOf(v); if (i >= 0) gAdd.sets.splice(i, 1); else gAdd.sets.push(v); renderAdd(); });
+  $('guse').querySelectorAll('[data-gu]').forEach(b => b.onclick = () => { gAdd.use = b.dataset.gu; renderAdd(); });
+}
+$('gaddopen').onclick = () => { $('gadd').hidden = false; $('gaddopen').hidden = true; renderAdd(); };
+$('gaddcancel').onclick = () => { $('gadd').hidden = true; $('gaddopen').hidden = false; };
+$('gaddsave').onclick = () => {
+  if (!gAdd.sets.length) { toast('Выбери набор'); return; }
+  const have = new Set((prefs.ram || []).map(ramId));
+  gAdd.sets.forEach(s => { const r = {type: gAdd.type, set: s, use: gAdd.use}; if (!have.has(ramId(r))) prefs.ram.push(r); });
+  gAdd.sets = []; $('gadd').hidden = true; $('gaddopen').hidden = false; savePrefs('Цель сохранена'); renderGoals();
+};
+async function savePrefs(okText) {
   if (!token()) { toast('Нужен ключ доступа'); return; }
-  const c = curCat(); if (!c) return; const id = huntId();
-  const labels = {}; c.sections.forEach(s => { const ids = huntSel.filters[s.param]; if (ids) labels[s.title] = ids.map(i => (s.options.find(o => o.id === i) || {}).label || i); });
-  const body = {rev: Date.now(), updated_at: new Date().toISOString(), updated_by: 'app',
-    hunts: [{id, name: c.name + (Object.keys(labels).length ? ': ' + Object.values(labels).map(a => a.join('+')).join(', ') : ''), category: c.id, filters: huntSel.filters, labels}]};
-  $('hmsg').textContent = 'Сохраняю…';
+  prefs.rev = Date.now(); prefs.updated_at = new Date().toISOString();
   try {
     for (let t = 0; ; t++) {
-      try { huntsDoc.sha = await writeJson('hunts.json', body, huntsDoc.sha, 'app: охота ' + id); break; }
-      catch (e) { if (t < 1 && /409|422/.test(String(e.message))) huntsDoc.sha = (await readJson('hunts.json')).sha; else throw e; }
+      try { prefsSha = await writeJson('prefs.json', prefs, prefsSha, 'app: цели'); break; }
+      catch (e) { if (t < 1 && /409|422/.test(String(e.message))) prefsSha = (await readJson('prefs.json')).sha; else throw e; }
     }
-    $('hmsg').textContent = 'Сохранено: ' + id + '. Парсер подхватит и начнёт обход.'; renderMarket();
-  } catch (e) { $('hmsg').textContent = 'Не сохранилось: ' + (e.message || e); }
-};
-const rub = n => n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ₽';
-function cfgName(c) {
-  if (c.modules && c.gb) return c.modules + '×' + c.gb + ' ГБ' + (c.mhz ? ' · ' + c.mhz + ' МГц' : '');
-  return c.key || '?';
+    toast(okText);
+  } catch (e) { toast('Не сохранилось: ' + (e.message || e)); }
 }
-function renderMarket() {
-  const id = huntId(); const h = market && market.hunts && market.hunts[id];
-  const head = $('hmarkhead'), box = $('hmarket');
-  if (!h || !(h.configs || []).length) {
-    head.textContent = 'Для охоты «' + id + '» данных пока нет. Парсер ещё не обошёл раздел или не сохранён выбор.'; box.innerHTML = ''; return;
-  }
-  const q = ($('hq').value || '').toLowerCase().replace(/[x×*]/g, 'x').replace(/\s+/g, ' ').trim();
-  const list = h.configs.filter(c => !q || (cfgName(c) + ' ' + (c.key || '')).toLowerCase().replace(/[×*]/g, 'x').replace(/гб|мгц|·/g, '').replace(/\s+/g, ' ').includes(q))
-    .sort((a, b) => (b.sold_week || 0) - (a.sold_week || 0)).slice(0, 80);
-  const upd = market.updated ? ' · обновлено ' + new Date(market.updated).toLocaleString('ru-RU', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '';
-  head.textContent = 'Конфигураций: ' + h.configs.length + upd;
-  box.innerHTML = list.map(c => `<div class="mk"><div><div class="n">${esc(cfgName(c))}</div>
-    <div class="s">в продаже ${c.listed == null ? '—' : c.listed}${c.avg_days != null ? ' · снимается за ' + Math.round(c.avg_days) + ' дн' : ''}</div></div>
-    <div class="r"><div class="n">${esc(rub(c.median))}</div><div class="s">продаж за неделю ${c.sold_week == null ? '—' : c.sold_week}${c.avg != null ? ' · сред. ' + esc(rub(c.avg)) : ''}</div></div></div>`).join('') || '<p class="m">Ничего не найдено.</p>';
-}
-$('hq').oninput = renderMarket;
 
-// ---------- Настройки ----------
-let settings = {values: {}, sha: null}, schema = [];
 async function loadSettings() {
   if (!token()) { $('controls').innerHTML = '<p class="m">Сначала вставь ключ доступа на вкладке «Ещё».</p>'; return; }
   try {
