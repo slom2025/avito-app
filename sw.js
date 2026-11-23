@@ -19,12 +19,13 @@ self.addEventListener('push', e => {
   const item = Object.assign({id: 'push-' + received_at, title: 'Находка', body: ''}, d, {received_at});
   const delay = item.sent_at ? Math.max(0, (received_at - item.sent_at) / 1000) : null;
   e.waitUntil((async () => {
-    try { await Store.put(item); await Store.trim(); } catch (_) {}
     const cl = await clients.matchAll({type: 'window', includeUncontrolled: true});
+    item.app_open = cl.some(c => c.visibilityState === 'visible'); // для разбора задержек: было ли приложение на экране
+    try { await Store.put(item); await Store.trim(); } catch (_) {}
     cl.forEach(c => c.postMessage({type: 'item', item}));
     await self.registration.showNotification(item.title, {
       body: item.body, icon: 'icon-192.png', tag: item.id, data: {url: item.url || './', id: item.id},
-      timestamp: item.sent_at || received_at
+      timestamp: item.sent_at || received_at, silent: !!item.test
     });
   })());
 });

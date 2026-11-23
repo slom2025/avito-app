@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.16', pollMs: 30000
+  version: '0.17', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -130,6 +130,29 @@ async function toggleMark(id, title) {
     renderFeed();
   } catch (e) { toast('Не сохранилось: ' + (e.message || e)); }
 }
+// Квитанции о доставке пушей (23.11, разбор «куда теряются 5 минут»): когда комп отправил и когда телефон получил.
+// Пишутся в receipts.json хранилища не чаще раза в 10 минут и только если появилось новое. Ошибка ничего не ломает.
+let rcptBusy = false;
+async function uploadReceipts() {
+  if (rcptBusy || !token()) return;
+  const last = +(ls.get('rcpt_at') || 0); if (Date.now() - last < 10 * 60 * 1000) return;
+  rcptBusy = true;
+  try {
+    const items = (await Store.all()).filter(it => it.sent_at && it.received_at)
+      .map(it => ({id: it.id, sent_at: it.sent_at, received_at: it.received_at, app_open: it.app_open, test: it.test || undefined}))
+      .sort((x, y) => x.sent_at - y.sent_at).slice(-300);
+    if (!items.length) return;
+    const sig = items.length + ':' + (items.length ? items[items.length - 1].id : '');
+    if (sig === ls.get('rcpt_sig')) { ls.set('rcpt_at', String(Date.now())); return; }
+    const doc = {updated_at: new Date().toISOString(), clock_fix_ms: clockFix(), ua: navigator.userAgent, items};
+    for (let t = 0; ; t++) {
+      const cur = await readJson('receipts.json');
+      try { await writeJson('receipts.json', doc, cur.sha, 'app: квитанции пушей'); break; }
+      catch (e) { if (!(t < 1 && /409|422/.test(String(e.message)))) throw e; }
+    }
+    ls.set('rcpt_sig', sig); ls.set('rcpt_at', String(Date.now()));
+  } catch (_) {} finally { rcptBusy = false; }
+}
 let feedEtag = ls.get('feed_etag') || '';
 async function loadFeed() {
   if (!token()) { $('conn').textContent = 'Нет ключа доступа (вкладка «Ещё»)'; return; }
@@ -143,11 +166,11 @@ async function loadFeed() {
     const j = await r.json();
     for (const it of (j.items || [])) {
       const old = await Store.get(it.id);
-      await Store.put(Object.assign({}, it, old && old.received_at ? {received_at: old.received_at} : {}));
+      await Store.put(Object.assign({}, it, old && old.received_at ? {received_at: old.received_at, app_open: old.app_open} : {}));
     }
     await Store.trim();
     $('conn').textContent = 'На связи · ' + now;
-    renderFeed();
+    renderFeed(); uploadReceipts();
   } catch (e) { $('conn').textContent = 'Нет связи с хранилищем (' + (e.message || e) + ')'; }
 }
 
