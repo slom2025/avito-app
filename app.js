@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.17', pollMs: 30000
+  version: '0.18', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -159,7 +159,7 @@ async function loadFeed() {
   try {
     const r = await gh('feed.json', {headers: Object.assign({Accept: 'application/vnd.github.raw+json'}, feedEtag ? {'If-None-Match': feedEtag} : {})});
     const now = new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
-    if (r.status === 304) { $('conn').textContent = 'На связи · ' + now; return; }
+    if (r.status === 304) { $('conn').textContent = 'На связи · ' + now; uploadReceipts(); return; }
     if (r.status === 404) { $('conn').textContent = 'На связи, лента пока пустая'; return; }
     if (!r.ok) throw new Error(r.status);
     feedEtag = r.headers.get('ETag') || ''; ls.set('feed_etag', feedEtag);
@@ -321,28 +321,38 @@ async function pushState() {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg && await reg.pushManager.getSubscription();
     $('pushstate').textContent = sub && Notification.permission === 'granted' ? 'Пуши включены.' : 'Не включены.';
-    $('pushbtn').textContent = sub ? 'Переподключить пуши' : 'Включить пуши';
-    $('pushtest').hidden = !sub;
+    $('pushbtn').textContent = sub ? 'Записать подписку ещё раз' : 'Включить пуши';
+    $('pushtest').hidden = !sub; $('pushfresh').hidden = !sub;
   } catch (_) {}
 }
-$('pushbtn').onclick = async () => {
+// Записать подписку в хранилище, чтобы комп слал на неё. Пишем только если адрес новый (или force).
+async function saveSub(sub, force) {
+  const subJson = sub.toJSON();
+  if (!token()) return false;
+  if (!force && ls.get('sub_endpoint') === subJson.endpoint) return true;
+  const id = (subJson.keys.auth || 'dev').replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
+  const cur = await readJson('subs/' + id + '.json');
+  await writeJson('subs/' + id + '.json', {added: new Date().toISOString(), ua: navigator.userAgent, subscription: subJson}, cur.sha, 'app: подписка на пуши');
+  ls.set('sub_endpoint', subJson.endpoint);
+  return true;
+}
+// 23.11: кнопка больше НЕ убивает подписку. Каждая новая подписка делала старую мёртвой, и пуши, ушедшие на неё, терялись.
+// Обычное нажатие = записать текущую подписку ещё раз; новая подписка — только отдельной кнопкой «Новая подписка».
+async function doSubscribe(fresh) {
   try {
     const reg = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
     if (await Notification.requestPermission() !== 'granted') { toast('Уведомления не разрешены в настройках сайта'); return; }
-    // Старая подписка могла умереть у Google (ответ 410), поэтому всегда берём новую
-    const old = await reg.pushManager.getSubscription();
-    if (old) { try { await old.unsubscribe(); } catch (_) {} }
-    const sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64u(CFG.publicKey)});
-    const subJson = sub.toJSON();
-    if (token()) {
-      const id = (subJson.keys.auth || 'dev').replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
-      const cur = await readJson('subs/' + id + '.json');
-      await writeJson('subs/' + id + '.json', {added: new Date().toISOString(), ua: navigator.userAgent, subscription: subJson}, cur.sha, 'app: подписка на пуши');
-      toast('Пуши включены и записаны');
-    } else toast('Пуши включены. Вставь ключ доступа, чтобы парсер мог слать пуши.');
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && fresh) { try { await sub.unsubscribe(); } catch (_) {} sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64u(CFG.publicKey)});
+    toast(await saveSub(sub, true) ? (fresh ? 'Новая подписка записана' : 'Пуши включены и записаны') : 'Пуши включены. Вставь ключ доступа, чтобы парсер мог слать пуши.');
     pushState();
   } catch (e) { toast('Ошибка: ' + (e.message || e)); }
-};
+}
+$('pushbtn').onclick = () => doSubscribe(false);
+$('pushfresh').onclick = () => { if ($('pushfresh').dataset.arm) { delete $('pushfresh').dataset.arm; doSubscribe(true); } else { $('pushfresh').dataset.arm = '1'; toast('Нажми ещё раз: старая подписка умрёт. Нужно, только если пуши совсем не идут'); setTimeout(() => delete $('pushfresh').dataset.arm, 5000); } };
+// При каждом запуске: если Chrome сам сменил подписку, тихо записываем новую
+async function syncSub() { try { const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if (sub && Notification.permission === 'granted') await saveSub(sub, false); } catch (_) {} }
 $('pushtest').onclick = async () => {
   const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription();
   if (!sub) return; $('subtext').hidden = false; $('subtext').value = JSON.stringify(sub.toJSON()); $('subtext').select();
@@ -383,7 +393,7 @@ if ('serviceWorker' in navigator) {
     if (e.data && e.data.type === 'go') showGo(e.data.url);
   });
 }
-renderFeed(); loadFeed(); pushState();
+renderFeed(); loadFeed(); pushState(); syncSub();
 setInterval(() => { if (document.visibilityState === 'visible') loadFeed(); }, CFG.pollMs);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { renderFeed(); loadFeed(); } });
 try { const go = new URLSearchParams(location.search).get('go'); if (go) showGo(go); } catch (_) {}
