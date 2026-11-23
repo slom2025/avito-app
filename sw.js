@@ -7,6 +7,7 @@ self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
+  if (u.pathname.endsWith('version.json')) return; // проверка версии и часов идёт только по сети, в кэш не копится
   e.respondWith(fetch(e.request, {cache: 'no-cache'}).then(r => { const c = r.clone(); caches.open('shell-v2').then(x => x.put(e.request, c)); return r; })
     .catch(() => caches.match(e.request)));
 });

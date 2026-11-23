@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.15', pollMs: 30000
+  version: '0.16', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -64,6 +64,19 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 });
 
 // ---------- Лента ----------
+const hm = ms => { const d = new Date(ms), today = new Date().toDateString() === d.toDateString();
+  return (today ? '' : d.toLocaleDateString('ru-RU', {day: 'numeric', month: 'short'}) + ' ') + d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}); };
+// Время публикации: из published_at, если комп его прислал, иначе из строки «⏱ N мин/ч от публикации» (от момента отправки компом)
+function pubAt(it) {
+  if (it.published_at) { const ms = typeof it.published_at === 'number' ? it.published_at : Date.parse(it.published_at); if (ms) return {ms, approx: false}; }
+  const m = /⏱\s*(\d+)\s*(мин|ч) от публикации/.exec(it.body || '');
+  if (!m || !it.sent_at) return null;
+  return {ms: it.sent_at - (+m[1]) * (m[2] === 'ч' ? 3600000 : 60000), approx: m[2] === 'ч'};
+}
+const cleanBody = b => String(b || '').replace(/\n?⏱[^\n]*от публикации/g, '').trim();
+// Поправка часов телефона по времени сервера сайта (заголовок Date своего же сайта; у api.github.com он скрыт), чтобы «пришло» не врало из-за неточных часов
+const clockFix = () => +(ls.get('clock_fix') || 0);
+function noteServerTime(r) { const d = Date.parse(r.headers.get('Date') || ''); if (d) ls.set('clock_fix', String(Math.round((d + 500 - Date.now()) / 1000) * 1000)); }
 function ago(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);
   if (s < 60) return Math.round(s) + ' с назад';
@@ -76,14 +89,17 @@ async function renderFeed() {
   const el = $('feed');
   if (!items.length) { el.innerHTML = '<div class="empty">Находок пока нет.<br>Когда парсер что-то найдёт, они появятся здесь.</div>'; return; }
   el.innerHTML = items.slice(0, 200).map(it => {
-    const delay = (it.sent_at && it.received_at) ? (it.received_at - it.sent_at) / 1000 : null;
-    const dtxt = delay == null ? '' : delay < 60 ? Math.round(delay) + ' с' : Math.floor(delay / 60) + ' мин ' + Math.round(delay % 60) + ' с';
-    const dl = delay == null ? '' : `<span class="badge ${delay < 5 ? 'fast' : 'slow'}">пуш с компа до телефона ${dtxt}</span>`;
-    const t = it.sent_at ? 'комп отправил в ' + new Date(it.sent_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) + ' (' + ago(it.sent_at) + ')' : '';
-    const tag = it.category ? `<span class="badge">${esc(it.category)}</span>` : '';
+    // Два времени, которые важны: когда продавец выложил и когда пуш пришёл на телефон. Остальное убрано (23.11).
+    const pub = pubAt(it), got = it.received_at ? it.received_at + clockFix() : null;
+    const pubTxt = pub ? `выложено ${pub.approx ? '~' : ''}${hm(pub.ms)}` : '';
+    let gotTxt = got ? `пуш пришёл ${hm(got)}` : 'пуша не было, только лента';
+    if (got && pub && !pub.approx) { const m = Math.max(0, Math.round((got - pub.ms) / 60000)); gotTxt += ` <span class="badge ${m <= 10 ? 'fast' : 'slow'}">через ${m} мин</span>`; }
+    const t = [pubTxt, gotTxt].filter(Boolean).join(' · ');
+    const dl = '';
+    const tag = '';
     const price = it.price ? `<span class="price">${esc(it.price)}</span>` : '';
     const inner = `${price}<div class="t">${esc(it.title)}</div>
-      <div class="meta">${tag}${dl}${t}</div>${it.body ? `<div class="body">${esc(it.body)}</div>` : ''}`;
+      <div class="meta">${tag}${dl}${t}</div>${cleanBody(it.body) ? `<div class="body">${esc(cleanBody(it.body))}</div>` : ''}`;
     const nd = it.url && /^\d+$/.test(String(it.id || '')) ? (marked.has(String(it.id))
       ? `<button class="sec nd on" data-nd="${esc(it.id)}">✓ Отмечено: доставки нет (отменить)</button>`
       : `<button class="sec nd" data-nd="${esc(it.id)}" data-ndt="${esc(it.title)}">Доставки нет — пуш зря</button>`) : '';
@@ -321,12 +337,12 @@ $('reload').onclick = async () => {
 };
 
 // ---------- Запуск ----------
-$('ver').textContent = 'Версия ' + CFG.version;
+$('ver').textContent = 'Версия ' + CFG.version + (clockFix() ? ' · часы телефона ' + (clockFix() > 0 ? 'отстают на ' : 'спешат на ') + Math.abs(clockFix() / 1000) + ' с' : '');
 if (token()) $('tokenmsg').textContent = 'Ключ сохранён (…' + token().slice(-4) + '). Вставлять заново не нужно.';
 // Автообновление: если на сервере версия новее, приложение само перезагружается со свежими файлами
 async function autoUpdate() {
   try {
-    const r = await fetch('version.json?t=' + Date.now(), {cache: 'no-store'}); if (!r.ok) return;
+    const r = await fetch('version.json?t=' + Date.now(), {cache: 'no-store'}); if (!r.ok) return; noteServerTime(r);
     const v = (await r.json()).v;
     if (v && v !== CFG.version) {
       const key = 'upd_' + v; let done = false; try { done = sessionStorage.getItem(key); sessionStorage.setItem(key, '1'); } catch (_) {}
