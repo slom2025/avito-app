@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.13', pollMs: 30000
+  version: '0.14', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -144,7 +144,7 @@ const rub = n => n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' �
 const num = n => n == null ? '—' : String(n);
 const mins = n => n == null ? '—' : Math.round(n) + ' мин';
 const USES = [['desktop', 'Компьютерная'], ['laptop', 'Ноутбучная']];
-let goals = null, prefs = {rev: 0, targets: {}, ram: []}, prefsSha = null, gOpen = {}, gAdd = {type: 'DDR4', sets: [], use: 'desktop'};
+let goals = null, prefs = {rev: 0, targets: {}, ram: []}, prefsSha = null, gOpen = {}, gOffOpen = {}, gAdd = {type: 'DDR4', sets: [], use: 'desktop'};
 const ramId = r => 'ram-' + r.type.toLowerCase() + '-' + r.set + '-' + r.use;
 const ramName = r => 'Оперативка ' + r.type + ' ' + String(r.set).replace('x', '×') + ', ' + (r.use === 'laptop' ? 'ноутбучная' : 'компьютерная');
 const isOn = t => { const p = prefs.targets[t.id]; return p && 'on' in p ? p.on !== false : t.on !== false; };
@@ -177,15 +177,20 @@ function renderGoals() {
     .filter(r => !known.has(r.id));
   $('ggroups').innerHTML = groups.map(g => {
     const rows = ts.filter(t => (t.group || 'other') === g.id).concat(g.id === 'other' ? ramRows : []);
-    const rowsHtml = rows.length ? rows.map(t => t.ram
+    const one = t => t.ram
       ? `<div class="row"><span class="ar">·</span><div class="l">${esc(t.name)}<div class="h">${esc(t.sub)}</div></div><button class="sec" data-delram="${esc(t.id)}" style="padding:8px 12px">Убрать</button></div>`
-      : goalRow(t)).join('') : '<p class="m">Пока пусто.</p>';
+      : goalRow(t);
+    // Выключенные цели прячем в свёрнутый список внизу группы, чтобы не листать их каждый раз
+    const onRows = rows.filter(t => t.ram || isOn(t)), offRows = rows.filter(t => !t.ram && !isOn(t));
+    const offHtml = offRows.length ? `<button class="offt" data-offg="${esc(g.id)}">${gOffOpen[g.id] ? '▾' : '▸'} Выключенные: ${offRows.length}</button>${gOffOpen[g.id] ? offRows.map(one).join('') : ''}` : '';
+    const rowsHtml = rows.length ? (onRows.length ? onRows.map(one).join('') : '<p class="m">Все цели здесь выключены.</p>') + offHtml : '<p class="m">Пока пусто.</p>';
     const fc = g.add_min != null && g.id === 'other' ? `<div class="fc">Если добавить ещё цель: примерно +${Math.round(g.add_min)} мин</div>` : '';
     return `<div class="card"><div class="gh"><b>${g.id === 'fast' ? '⚡ ' : ''}${esc(g.name)}</b><span class="md">${g.median_min != null ? 'находка через ~' + Math.round(g.median_min) + ' мин' : (goals ? '<span style="color:var(--muted)">мало данных для медианы</span>' : '')}</span></div>${rowsHtml}${fc}</div>`;
   }).join('');
   $('ggroups').querySelectorAll('[data-open]').forEach(el => el.onclick = e => { if (e.target.closest('[data-stop]')) return; gOpen[el.dataset.open] = !gOpen[el.dataset.open]; renderGoals(); });
+  $('ggroups').querySelectorAll('[data-offg]').forEach(el => el.onclick = () => { gOffOpen[el.dataset.offg] = !gOffOpen[el.dataset.offg]; renderGoals(); });
   $('ggroups').querySelectorAll('[data-goal]').forEach(el => el.onchange = () => {
-    prefs.targets[el.dataset.goal] = {on: el.checked}; savePrefs(el.checked ? 'Цель включена' : 'Цель выключена: пуши по ней не придут'); renderGoals();
+    prefs.targets[el.dataset.goal] = {on: el.checked}; savePrefs(el.checked ? 'Цель включена' : 'Цель выключена и убрана вниз, в «Выключенные»'); renderGoals();
   });
   $('ggroups').querySelectorAll('[data-delram]').forEach(el => el.onclick = () => {
     prefs.ram = (prefs.ram || []).filter(r => ramId(r) !== el.dataset.delram); savePrefs('Цель убрана'); renderGoals();
