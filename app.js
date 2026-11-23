@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.12', pollMs: 30000
+  version: '0.13', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -181,7 +181,7 @@ function renderGoals() {
       ? `<div class="row"><span class="ar">·</span><div class="l">${esc(t.name)}<div class="h">${esc(t.sub)}</div></div><button class="sec" data-delram="${esc(t.id)}" style="padding:8px 12px">Убрать</button></div>`
       : goalRow(t)).join('') : '<p class="m">Пока пусто.</p>';
     const fc = g.add_min != null && g.id === 'other' ? `<div class="fc">Если добавить ещё цель: примерно +${Math.round(g.add_min)} мин</div>` : '';
-    return `<div class="card"><div class="gh"><b>${g.id === 'fast' ? '⚡ ' : ''}${esc(g.name)}</b><span class="md">${g.median_min != null ? 'находка через ~' + Math.round(g.median_min) + ' мин' : ''}</span></div>${rowsHtml}${fc}</div>`;
+    return `<div class="card"><div class="gh"><b>${g.id === 'fast' ? '⚡ ' : ''}${esc(g.name)}</b><span class="md">${g.median_min != null ? 'находка через ~' + Math.round(g.median_min) + ' мин' : (goals ? '<span style="color:var(--muted)">мало данных для медианы</span>' : '')}</span></div>${rowsHtml}${fc}</div>`;
   }).join('');
   $('ggroups').querySelectorAll('[data-open]').forEach(el => el.onclick = e => { if (e.target.closest('[data-stop]')) return; gOpen[el.dataset.open] = !gOpen[el.dataset.open]; renderGoals(); });
   $('ggroups').querySelectorAll('[data-goal]').forEach(el => el.onchange = () => {
