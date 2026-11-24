@@ -115,7 +115,9 @@ public class PollService extends Service {
             try {
                 checkOnce();
             } catch (Throwable e) {
-                status("Нет связи, повторю через 10 с (" + hhmm(t0) + ")");
+                String why = e.getClass().getSimpleName() + (e.getMessage() != null ? ": " + e.getMessage() : "");
+                if (why.length() > 140) why = why.substring(0, 140);
+                status("Нет связи с GitHub в " + hhmm(t0) + ", повторю через 10 с. Причина: " + why);
             }
             long left = INTERVAL_MS - (System.currentTimeMillis() - t0);
             if (left > 0) {
