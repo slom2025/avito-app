@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.19', pollMs: 30000
+  version: '0.20', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -323,10 +323,10 @@ function nativeState() {
   if (!st.has_token) warn.push('вставь ключ доступа ниже');
   if (st.notifications === false) warn.push('разреши уведомления');
   if (st.battery_free === false) warn.push('сними ограничение батареи');
-  $('pushstate').textContent = 'Уведомления показывает приложение «Охотник» (версия ' + (st.version || '?') + '). ' +
+  $('pushstate').textContent = 'Уведомления показывает приложение «Охотник» (сборка ' + (st.version || '?') + '). ' +
     (warn.length ? 'Нужно: ' + warn.join(', ') + '.' : 'Всё включено. ') + (st.status ? ' ' + st.status : '');
   $('pushbtn').textContent = 'Проверить уведомление';
-  $('pushtest').hidden = false; $('pushtest').textContent = st.battery_free === false ? 'Снять ограничение батареи' : 'Настройки батареи';
+  $('pushtest').hidden = false; $('pushtest').textContent = st.battery_free === false ? 'Снять ограничение батареи' : 'Фон и автозапуск';
   $('pushfresh').hidden = false; $('pushfresh').textContent = 'Настройки уведомлений';
 }
 async function pushState() {

@@ -138,8 +138,12 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface public void openBatterySettings() {
             runOnUiThread(() -> {
-                try { startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))); }
-                catch (Exception e) {
+                PowerManager pm = getSystemService(PowerManager.class);
+                try {
+                    // Если ограничение уже снято, это окно не открывается — тогда открываем страницу приложения (там фон и автозапуск)
+                    if (pm.isIgnoringBatteryOptimizations(getPackageName())) throw new IllegalStateException("already");
+                    startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+                } catch (Exception e) {
                     try { startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
                 }
             });
