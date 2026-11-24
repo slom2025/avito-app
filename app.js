@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.18', pollMs: 30000
+  version: '0.19', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -315,7 +315,22 @@ async function saveSettings(retry) {
 
 // ---------- Пуши ----------
 const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4); const r = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, c => c.charCodeAt(0)); };
+// Внутри своего Android-приложения «Охотник» уведомления показывает само приложение, а не Chrome
+const NATIVE = (() => { try { return !!window.HunterApp; } catch (_) { return false; } })();
+function nativeState() {
+  let st = {}; try { st = JSON.parse(window.HunterApp.status() || '{}'); } catch (_) {}
+  const warn = [];
+  if (!st.has_token) warn.push('вставь ключ доступа ниже');
+  if (st.notifications === false) warn.push('разреши уведомления');
+  if (st.battery_free === false) warn.push('сними ограничение батареи');
+  $('pushstate').textContent = 'Уведомления показывает приложение «Охотник» (версия ' + (st.version || '?') + '). ' +
+    (warn.length ? 'Нужно: ' + warn.join(', ') + '.' : 'Всё включено. ') + (st.status ? ' ' + st.status : '');
+  $('pushbtn').textContent = 'Проверить уведомление';
+  $('pushtest').hidden = false; $('pushtest').textContent = st.battery_free === false ? 'Снять ограничение батареи' : 'Настройки батареи';
+  $('pushfresh').hidden = false; $('pushfresh').textContent = 'Настройки уведомлений';
+}
 async function pushState() {
+  if (NATIVE) { nativeState(); return; }
   try {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) { $('pushstate').textContent = 'Этот браузер не умеет пуши.'; return; }
     const reg = await navigator.serviceWorker.getRegistration();
@@ -349,17 +364,19 @@ async function doSubscribe(fresh) {
     pushState();
   } catch (e) { toast('Ошибка: ' + (e.message || e)); }
 }
-$('pushbtn').onclick = () => doSubscribe(false);
-$('pushfresh').onclick = () => { if ($('pushfresh').dataset.arm) { delete $('pushfresh').dataset.arm; doSubscribe(true); } else { $('pushfresh').dataset.arm = '1'; toast('Нажми ещё раз: старая подписка умрёт. Нужно, только если пуши совсем не идут'); setTimeout(() => delete $('pushfresh').dataset.arm, 5000); } };
+$('pushbtn').onclick = () => { if (NATIVE) { window.HunterApp.testNotification(); setTimeout(nativeState, 500); return; } doSubscribe(false); };
+$('pushfresh').onclick = () => { if (NATIVE) { window.HunterApp.openNotificationSettings(); return; } if ($('pushfresh').dataset.arm) { delete $('pushfresh').dataset.arm; doSubscribe(true); } else { $('pushfresh').dataset.arm = '1'; toast('Нажми ещё раз: старая подписка умрёт. Нужно, только если пуши совсем не идут'); setTimeout(() => delete $('pushfresh').dataset.arm, 5000); } };
 // При каждом запуске: если Chrome сам сменил подписку, тихо записываем новую
-async function syncSub() { try { const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if (sub && Notification.permission === 'granted') await saveSub(sub, false); } catch (_) {} }
+async function syncSub() { if (NATIVE) return; try { const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if (sub && Notification.permission === 'granted') await saveSub(sub, false); } catch (_) {} }
 $('pushtest').onclick = async () => {
+  if (NATIVE) { window.HunterApp.openBatterySettings(); return; }
   const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription();
   if (!sub) return; $('subtext').hidden = false; $('subtext').value = JSON.stringify(sub.toJSON()); $('subtext').select();
 };
 $('savetoken').onclick = async () => {
   const v = $('token').value.trim(); if (!v) return;
   ls.set('gh_token', v); $('token').value = ''; feedEtag = ''; ls.set('feed_etag', '');
+  if (NATIVE) { try { window.HunterApp.setToken(v); } catch (_) {} setTimeout(nativeState, 800); }
   $('tokenmsg').textContent = 'Проверяю…';
   try { const r = await gh('feed.json'); const ok = r.ok || r.status === 404; $('tokenmsg').textContent = ok ? 'Ключ принят.' : 'Ключ не подошёл (' + r.status + ').'; if (ok) loadFeed(); }
   catch (e) { $('tokenmsg').textContent = 'Нет связи с GitHub.'; }
@@ -393,7 +410,9 @@ if ('serviceWorker' in navigator) {
     if (e.data && e.data.type === 'go') showGo(e.data.url);
   });
 }
+if (NATIVE && token()) { try { window.HunterApp.setToken(token()); } catch (_) {} }
 renderFeed(); loadFeed(); pushState(); syncSub();
+if (NATIVE) setInterval(() => { if (document.visibilityState === 'visible') nativeState(); }, 5000);
 setInterval(() => { if (document.visibilityState === 'visible') loadFeed(); }, CFG.pollMs);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { renderFeed(); loadFeed(); } });
 try { const go = new URLSearchParams(location.search).get('go'); if (go) showGo(go); } catch (_) {}
