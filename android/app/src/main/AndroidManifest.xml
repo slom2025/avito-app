@@ -38,7 +38,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Personal deal alerts: polls own GitHub repo every 20 s" />
+                android:value="Personal deal alerts: polls own GitHub repo every 10 s" />
         </service>
 
         <receiver android:name=".BootReceiver" android:exported="true">

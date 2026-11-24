@@ -37,7 +37,7 @@ public class PollService extends Service {
     static final String CH_DEALS = "deals";
     static final String CH_SERVICE = "service";
     static final int ID_ONGOING = 1;
-    static final long INTERVAL_MS = 20_000;
+    static final long INTERVAL_MS = 10_000;
     static final int SEEN_MAX = 600;
 
     private volatile boolean running;
@@ -115,7 +115,7 @@ public class PollService extends Service {
             try {
                 checkOnce();
             } catch (Throwable e) {
-                status("Нет связи, повторю через 20 с (" + hhmm(t0) + ")");
+                status("Нет связи, повторю через 10 с (" + hhmm(t0) + ")");
             }
             long left = INTERVAL_MS - (System.currentTimeMillis() - t0);
             if (left > 0) {
