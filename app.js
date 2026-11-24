@@ -1,7 +1,7 @@
 const CFG = {
   owner: 'slom2025', repo: 'avito-app-data',
   publicKey: 'BGFz_R0BNrnhfsZkRLu-ntVtTFNraOOrl3dKmAIuhxxjL-aKDbMh0hTmc0cqUEf7n1qmTCxm3Jnz5_VXqdrxGo4',
-  version: '0.20', pollMs: 30000
+  version: '0.21', pollMs: 30000
 };
 const $ = id => document.getElementById(id);
 const ls = {
@@ -67,11 +67,29 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 const hm = ms => { const d = new Date(ms), today = new Date().toDateString() === d.toDateString();
   return (today ? '' : d.toLocaleDateString('ru-RU', {day: 'numeric', month: 'short'}) + ' ') + d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}); };
 // Время публикации: из published_at, если комп его прислал, иначе из строки «⏱ N мин/ч от публикации» (от момента отправки компом)
+const NATIVE = (() => { try { return !!window.HunterApp; } catch (_) { return false; } })();
 function pubAt(it) {
   if (it.published_at) { const ms = typeof it.published_at === 'number' ? it.published_at : Date.parse(it.published_at); if (ms) return {ms, approx: false}; }
   const m = /⏱\s*(\d+)\s*(мин|ч) от публикации/.exec(it.body || '');
-  if (!m || !it.sent_at) return null;
-  return {ms: it.sent_at - (+m[1]) * (m[2] === 'ч' ? 3600000 : 60000), approx: m[2] === 'ч'};
+  if (m && it.sent_at) return {ms: it.sent_at - (+m[1]) * (m[2] === 'ч' ? 3600000 : 60000), approx: m[2] === 'ч'};
+  // Комплекты и ПК: в тексте только «Висит N ч» — время примерное
+  const h = /Висит\s*(\d+)\s*ч/.exec(it.body || '');
+  if (h && it.sent_at) return {ms: it.sent_at - (+h[1]) * 3600000, approx: true};
+  return null;
+}
+// Номер объявления: у комплектов комп кладёт в id всю ссылку, берём число из неё
+const adId = it => { const s = String(it.id || ''); if (/^\d+$/.test(s)) return s; const m = /(\d{6,})(?!.*\d{6,})/.exec(s + ' ' + (it.url || '')); return m ? m[1] : ''; };
+// Комп иногда кладёт название в поле цены: «9 999 ₽: Комплект …» — разносим обратно
+function fixItem(it) {
+  const m = /^([\d\s\u00a0]+₽)\s*:\s*(.+)$/.exec(String(it.price || '').trim());
+  if (!m) return it;
+  return Object.assign({}, it, {price: m[1].trim(), title: m[2].trim() + (it.title ? ' (' + String(it.title).toLowerCase() + ')' : '')});
+}
+// Внутри приложения «Охотник» время прихода берём из его собственного журнала уведомлений
+function nativeGot() {
+  const map = {}; if (!NATIVE) return map;
+  try { String(JSON.parse(window.HunterApp.status() || '{}').receipts || '').split(';').forEach(r => { const i = r.lastIndexOf(':'), j = r.lastIndexOf(':', i - 1); if (j > 0) map[r.slice(0, j)] = +r.slice(i + 1); }); } catch (_) {}
+  return map;
 }
 const cleanBody = b => String(b || '').replace(/\n?⏱[^\n]*от публикации/g, '').trim();
 // Поправка часов телефона по времени сервера сайта (заголовок Date своего же сайта; у api.github.com он скрыт), чтобы «пришло» не врало из-за неточных часов
@@ -88,7 +106,10 @@ async function renderFeed() {
   const items = await Store.all();
   const el = $('feed');
   if (!items.length) { el.innerHTML = '<div class="empty">Находок пока нет.<br>Когда парсер что-то найдёт, они появятся здесь.</div>'; return; }
-  el.innerHTML = items.slice(0, 200).map(it => {
+  const ng = nativeGot();
+  el.innerHTML = items.slice(0, 200).map(it0 => {
+    const it = fixItem(it0), id = adId(it);
+    if (!it.received_at && ng[String(it.id)]) it.received_at = ng[String(it.id)];
     // Два времени, которые важны: когда продавец выложил и когда пуш пришёл на телефон. Остальное убрано (23.11).
     const pub = pubAt(it), got = it.received_at ? it.received_at + clockFix() : null;
     const pubTxt = pub ? `выложено ${pub.approx ? '~' : ''}${hm(pub.ms)}` : '';
@@ -100,9 +121,9 @@ async function renderFeed() {
     const price = it.price ? `<span class="price">${esc(it.price)}</span>` : '';
     const inner = `${price}<div class="t">${esc(it.title)}</div>
       <div class="meta">${tag}${dl}${t}</div>${cleanBody(it.body) ? `<div class="body">${esc(cleanBody(it.body))}</div>` : ''}`;
-    const nd = it.url && /^\d+$/.test(String(it.id || '')) ? (marked.has(String(it.id))
-      ? `<button class="sec nd on" data-nd="${esc(it.id)}">✓ Отмечено: доставки нет (отменить)</button>`
-      : `<button class="sec nd" data-nd="${esc(it.id)}" data-ndt="${esc(it.title)}">Доставки нет — пуш зря</button>`) : '';
+    const nd = it.url && id ? (marked.has(id)
+      ? `<button class="sec nd on" data-nd="${esc(id)}">✓ Отмечено: доставки нет (отменить)</button>`
+      : `<button class="sec nd" data-nd="${esc(id)}" data-ndt="${esc(it.title)}">Доставки нет — пуш зря</button>`) : '';
     return it.url ? `<div class="card"><a class="item" href="${esc(avitoIntent(it.url))}">${inner}</a>${nd}</div>` : `<div class="card item">${inner}</div>`;
   }).join('');
   el.querySelectorAll('[data-nd]').forEach(b => b.onclick = () => toggleMark(b.dataset.nd, b.dataset.ndt || ''));
@@ -316,7 +337,6 @@ async function saveSettings(retry) {
 // ---------- Пуши ----------
 const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4); const r = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, c => c.charCodeAt(0)); };
 // Внутри своего Android-приложения «Охотник» уведомления показывает само приложение, а не Chrome
-const NATIVE = (() => { try { return !!window.HunterApp; } catch (_) { return false; } })();
 function nativeState() {
   let st = {}; try { st = JSON.parse(window.HunterApp.status() || '{}'); } catch (_) {}
   const warn = [];
